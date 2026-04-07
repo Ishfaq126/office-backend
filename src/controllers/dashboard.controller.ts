@@ -63,11 +63,11 @@ async function getAdminStats(req: AuthRequest, res: Response) {
     }),
     // Last 7 days completion trend
     prisma.$queryRaw`
-      SELECT DATE(completed_at) as date, COUNT(*) as count
+      SELECT DATE(completedAt) as date, COUNT(*) as count
       FROM tasks
-      WHERE completed_at >= NOW() - INTERVAL '7 days'
+      WHERE completedAt >= NOW() - INTERVAL '7 days'
       AND status = 'DONE'
-      GROUP BY DATE(completed_at)
+      GROUP BY DATE(completedAt)
       ORDER BY date
     `,
     prisma.user.count({ where: { isActive: true } }),

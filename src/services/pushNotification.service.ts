@@ -1,8 +1,11 @@
-import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
+import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceiptId } from 'expo-server-sdk';
 import prisma from '../utils/prisma';
 import { NotificationType } from '@prisma/client';
 
-const expo = new Expo();
+const expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
+
+// In-memory store of ticket IDs to check receipts for (flush every 15 min in prod)
+const pendingReceiptIds: ExpoPushReceiptId[] = [];
 
 interface NotificationPayload {
   title: string;
@@ -15,11 +18,9 @@ export async function sendPushNotification(
   userId: number,
   payload: NotificationPayload
 ): Promise<void> {
-  console.log(`\n--- 🔔 START PUSH ATTEMPT for User ID: ${userId} ---`);
-  
   try {
-    // 1. Check Database Insertion
-    const newNotification = await prisma.notification.create({
+    // 1. Always save to DB so in-app notifications work regardless of push
+    const dbNotif = await prisma.notification.create({
       data: {
         userId,
         title: payload.title,
@@ -28,79 +29,108 @@ export async function sendPushNotification(
         data: payload.data || {},
       },
     });
-    console.log(`✅ [Step 1] Saved to DB. Notification ID: ${newNotification.id}`);
+    console.log(`✅ [Step 1] Saved to DB. Notification ID: ${dbNotif.id}`);
 
-    // 2. Fetch User and Token
+    // 2. Get user's push token
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { expoPushToken: true, name: true },
     });
 
-    if (!user) {
-      console.error(`❌ [Step 2] User ${userId} not found in database!`);
+    if (!user?.expoPushToken) {
+      console.log(`⚠️  [Step 2] No push token for user ${userId} — in-app only.`);
       return;
     }
+    console.log(`📱 [Step 2] Found Token for ${user.name}: ${user.expoPushToken.slice(0, 30)}...`);
 
-    if (!user.expoPushToken) {
-      console.warn(`⚠️ [Step 2] User "${user.name}" (ID: ${userId}) has NO push token stored.`);
-      return;
-    }
-    console.log(`📱 [Step 2] Found Token for ${user.name}: ${user.expoPushToken.substring(0, 20)}...`);
-
-    // 3. Validate Token Format
+    // 3. Validate token format
     if (!Expo.isExpoPushToken(user.expoPushToken)) {
-      console.error(`❌ [Step 3] Token is NOT a valid Expo Push Token: ${user.expoPushToken}`);
-      // Clear invalid token
-      await prisma.user.update({
-        where: { id: userId },
-        data: { expoPushToken: null },
-      });
+      console.warn(`❌ [Step 3] INVALID token format for user ${userId}. Clearing.`);
+      await prisma.user.update({ where: { id: userId }, data: { expoPushToken: null } });
       return;
     }
     console.log(`✅ [Step 3] Token format is valid.`);
 
-    // 4. Construct Message
+    // 4. Build the message
+    // IMPORTANT: channelId must match a registered Android channel
     const message: ExpoPushMessage = {
       to: user.expoPushToken,
       sound: 'default',
       title: payload.title,
       body: payload.body,
-      data: payload.data,
+      data: { ...payload.data, notificationId: dbNotif.id },
       priority: 'high',
-      channelId: 'default',
       badge: 1,
+      // Android-specific
+      channelId: 'default',
+      // iOS-specific
+      categoryIdentifier: payload.type,
     };
 
-    // 5. Send to Expo
     console.log(`📤 [Step 4] Sending request to Expo servers...`);
     const chunks = expo.chunkPushNotifications([message]);
 
     for (const chunk of chunks) {
-      try {
-        const tickets: ExpoPushTicket[] = await expo.sendPushNotificationsAsync(chunk);
-        console.log(`🎫 [Step 5] Expo Response Received:`, JSON.stringify(tickets, null, 2));
+      const tickets = await expo.sendPushNotificationsAsync(chunk);
+      console.log(`🎫 [Step 5] Expo Response Received:`, JSON.stringify(tickets, null, 2));
 
-        for (const ticket of tickets) {
-          if (ticket.status === 'error') {
-            console.error('🔴 [Step 5] Expo Error Ticket:', ticket.message);
-            if (ticket.details?.error === 'DeviceNotRegistered') {
-              console.warn('🗑️ Device not registered. Removing token from DB.');
-              await prisma.user.update({
-                where: { id: userId },
-                data: { expoPushToken: null },
-              });
-            }
-          } else {
-            console.log('🚀 [Step 5] Success! Ticket ID:', ticket.id);
+      for (const ticket of tickets) {
+        if (ticket.status === 'ok') {
+          console.log(`🚀 [Step 5] Success! Ticket ID: ${ticket.id}`);
+          // Store ticket ID for receipt checking
+          pendingReceiptIds.push(ticket.id);
+        } else {
+          // status === 'error' means Expo itself rejected it
+          console.error(`❌ [Step 5] Expo REJECTED ticket:`, ticket);
+          if ((ticket as any).details?.error === 'DeviceNotRegistered') {
+            console.warn(`🗑️  Clearing stale token for user ${userId}`);
+            await prisma.user.update({ where: { id: userId }, data: { expoPushToken: null } });
+          }
+          if ((ticket as any).details?.error === 'InvalidCredentials') {
+            console.error('🔑 FCM/APNs credentials are invalid! Check your EAS push credentials.');
+          }
+          if ((ticket as any).details?.error === 'MessageTooBig') {
+            console.error('📦 Notification payload is too large (>4KB).');
           }
         }
-      } catch (err) {
-        console.error('❌ [Step 5] Network Error sending push chunk:', err);
       }
     }
-    console.log(`--- 🔔 END PUSH ATTEMPT --- \n`);
-  } catch (error) {
-    console.error('❌ CRITICAL ERROR in sendPushNotification:', error);
+    console.log(`--- 🔔 END PUSH ATTEMPT ---`);
+  } catch (error: any) {
+    console.error(`💥 sendPushNotification THREW:`, error?.message || error);
+  }
+}
+
+/**
+ * Check Expo push receipts for previously-sent tickets.
+ * Receipts tell you whether FCM/APNs actually delivered the notification.
+ * Call this ~15 minutes after sending — Expo holds receipts for 24h.
+ */
+export async function checkPushReceipts(): Promise<void> {
+  if (pendingReceiptIds.length === 0) return;
+
+  const ids = pendingReceiptIds.splice(0, pendingReceiptIds.length);
+  console.log(`🧾 Checking ${ids.length} push receipt(s)...`);
+
+  try {
+    const chunks = expo.chunkPushNotificationReceiptIds(ids);
+    for (const chunk of chunks) {
+      const receipts = await expo.getPushNotificationReceiptsAsync(chunk);
+      for (const [receiptId, receipt] of Object.entries(receipts)) {
+        if (receipt.status === 'ok') {
+          console.log(`✅ Receipt ${receiptId}: delivered successfully`);
+        } else {
+          console.error(`❌ Receipt ${receiptId}: FAILED`, receipt);
+          // receipt.details.error values:
+          // DeviceNotRegistered — token no longer valid
+          // MessageRateExceeded — too many messages
+          // MismatchSenderId   — wrong FCM sender
+          // InvalidCredentials — FCM/APNs key expired
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error('Error checking receipts:', err?.message);
   }
 }
 
@@ -108,12 +138,11 @@ export async function sendBulkPushNotifications(
   userIds: number[],
   payload: NotificationPayload
 ): Promise<void> {
-  await Promise.allSettled(
-    userIds.map(userId => sendPushNotification(userId, payload))
-  );
+  await Promise.allSettled(userIds.map(uid => sendPushNotification(uid, payload)));
 }
 
-// Notification builders
+// ─── Notification payload builders ────────────────────────────────────────────
+
 export const NotificationBuilders = {
   taskAssigned: (taskId: number, taskTitle: string) => ({
     title: '📋 New Task Assigned',
@@ -124,7 +153,7 @@ export const NotificationBuilders = {
 
   taskReassigned: (taskId: number, taskTitle: string, newAssigneeName: string) => ({
     title: '🔄 Task Reassigned',
-    body: `"${taskTitle}" has been reassigned to ${newAssigneeName}`,
+    body: `"${taskTitle}" was reassigned to ${newAssigneeName}`,
     type: 'TASK_REASSIGNED' as NotificationType,
     data: { taskId, screen: 'TaskDetail' },
   }),
@@ -145,7 +174,7 @@ export const NotificationBuilders = {
 
   taskDueSoon: (taskId: number, taskTitle: string, hoursLeft: number) => ({
     title: '⏰ Task Due Soon',
-    body: `"${taskTitle}" is due in ${hoursLeft} hours`,
+    body: `"${taskTitle}" is due in ${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''}`,
     type: 'TASK_DUE_SOON' as NotificationType,
     data: { taskId, screen: 'TaskDetail' },
   }),
@@ -159,7 +188,7 @@ export const NotificationBuilders = {
 
   statusChanged: (taskId: number, taskTitle: string, newStatus: string, changedBy: string) => ({
     title: '🔄 Status Updated',
-    body: `${changedBy} changed status of "${taskTitle}" to ${newStatus}`,
+    body: `${changedBy} changed "${taskTitle}" → ${newStatus.replace('_', ' ')}`,
     type: 'STATUS_CHANGED' as NotificationType,
     data: { taskId, screen: 'TaskDetail' },
   }),

@@ -1,4 +1,5 @@
 import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceiptId } from 'expo-server-sdk';
+import { sendWhatsAppNotification } from '../services/whatsapp.service';
 import prisma from '../utils/prisma';
 import { NotificationType } from '@prisma/client';
 
@@ -19,6 +20,8 @@ export async function sendPushNotification(
   payload: NotificationPayload
 ): Promise<void> {
   try {
+    console.log(`--- 🔔 START NOTIFICATION ATTEMPT for User ID: ${userId} ---`);
+
     // 1. Always save to DB so in-app notifications work regardless of push
     const dbNotif = await prisma.notification.create({
       data: {
@@ -31,28 +34,36 @@ export async function sendPushNotification(
     });
     console.log(`✅ [Step 1] Saved to DB. Notification ID: ${dbNotif.id}`);
 
-    // 2. Get user's push token
+    // 🟢 NEW: [Step 1.5] Trigger WhatsApp Message
+    // Formatting the message with *stars* makes the title Bold in WhatsApp
+    const whatsappMessage = `🔔 *${payload.title}*\n\n${payload.body}\n\n_Check the app for more details._`;
+    
+    // We don't necessarily need to 'await' this if we want the push logic to continue immediately
+    sendWhatsAppNotification(userId, whatsappMessage).catch(err => 
+      console.error(`❌ WhatsApp background error:`, err)
+    );
+
+    // 2. Get user's push token for Expo
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { expoPushToken: true, name: true },
     });
 
     if (!user?.expoPushToken) {
-      console.log(`⚠️  [Step 2] No push token for user ${userId} — in-app only.`);
+      console.log(`⚠️  [Step 2] No push token for ${user?.name || userId} — Mobile Push skipped (WhatsApp sent).`);
       return;
     }
     console.log(`📱 [Step 2] Found Token for ${user.name}: ${user.expoPushToken}`);
 
     // 3. Validate token format
     if (!Expo.isExpoPushToken(user.expoPushToken)) {
-      console.warn(`❌ [Step 3] INVALID token format for user ${userId}. Clearing.`);
+      console.warn(`❌ [Step 3] INVALID token format for user ${userId}. Clearing from DB.`);
       await prisma.user.update({ where: { id: userId }, data: { expoPushToken: null } });
       return;
     }
     console.log(`✅ [Step 3] Token format is valid.`);
 
     // 4. Build the message
-    // IMPORTANT: channelId must match a registered Android channel
     const message: ExpoPushMessage = {
       to: user.expoPushToken,
       sound: 'default',
@@ -61,10 +72,8 @@ export async function sendPushNotification(
       data: { ...payload.data, notificationId: dbNotif.id },
       priority: 'high',
       badge: 1,
-      // Android-specific
-      channelId: 'default',
-      // iOS-specific
-      categoryId: payload.type,
+      channelId: 'default', // Matches Android Channel ID
+      categoryId: payload.type, // Matches iOS Category ID
     };
 
     console.log(`📤 [Step 4] Sending request to Expo servers...`);
@@ -77,25 +86,20 @@ export async function sendPushNotification(
       for (const ticket of tickets) {
         if (ticket.status === 'ok') {
           console.log(`🚀 [Step 5] Success! Ticket ID: ${ticket.id}`);
-          // Store ticket ID for receipt checking
           pendingReceiptIds.push(ticket.id);
         } else {
-          // status === 'error' means Expo itself rejected it
           console.error(`❌ [Step 5] Expo REJECTED ticket:`, ticket);
+          
+          // Handle specific Expo errors
           if ((ticket as any).details?.error === 'DeviceNotRegistered') {
             console.warn(`🗑️  Clearing stale token for user ${userId}`);
             await prisma.user.update({ where: { id: userId }, data: { expoPushToken: null } });
-          }
-          if ((ticket as any).details?.error === 'InvalidCredentials') {
-            console.error('🔑 FCM/APNs credentials are invalid! Check your EAS push credentials.');
-          }
-          if ((ticket as any).details?.error === 'MessageTooBig') {
-            console.error('📦 Notification payload is too large (>4KB).');
           }
         }
       }
     }
     console.log(`--- 🔔 END PUSH ATTEMPT ---`);
+    
   } catch (error: any) {
     console.error(`💥 sendPushNotification THREW:`, error?.message || error);
   }

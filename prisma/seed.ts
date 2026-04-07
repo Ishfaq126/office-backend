@@ -4,57 +4,63 @@ import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Seeding database...');
+  console.log('🗑️ Deleting previous data...');
+  // Delete in order to respect foreign key constraints
+  await prisma.activityLog.deleteMany();
+  await prisma.comment.deleteMany();
+  await prisma.task.deleteMany();
+  await prisma.refreshToken.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.user.deleteMany();
 
-  // Create admin user
+  console.log('🌱 Seeding database with phone numbers...');
+
   const adminPassword = await bcrypt.hash('admin123', 10);
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@taskmaster.com' },
-    update: {},
-    create: {
-      email: 'admin@taskmaster.com',
-      name: 'Admin User',
+  const userPassword = await bcrypt.hash('user123', 10);
+
+  // 1. Create Admin (Ishfaq)
+  const admin = await prisma.user.create({
+    data: {
+      email: 'admin@gmail.com',
+      name: 'Ishfaq (Admin)',
       passwordHash: adminPassword,
       role: Role.ADMIN,
+      phoneNumber: '923337881264', // Cleaned format for WhatsApp
     },
   });
 
-  // Create regular users
-  const userPassword = await bcrypt.hash('user123', 10);
-  const user1 = await prisma.user.upsert({
-    where: { email: 'alice@taskmaster.com' },
-    update: {},
-    create: {
-      email: 'alice@taskmaster.com',
-      name: 'Alice Johnson',
+  // 2. Create Regular Users
+  const user1 = await prisma.user.create({
+    data: {
+      email: 'usama@gmail.com',
+      name: 'Usama',
       passwordHash: userPassword,
       role: Role.USER,
+      phoneNumber: '923705106055',
     },
   });
 
-  const user2 = await prisma.user.upsert({
-    where: { email: 'bob@taskmaster.com' },
-    update: {},
-    create: {
-      email: 'bob@taskmaster.com',
-      name: 'Bob Smith',
+  const user2 = await prisma.user.create({
+    data: {
+      email: 'azib@gmail.com',
+      name: 'Azib',
       passwordHash: userPassword,
       role: Role.USER,
+      phoneNumber: '923705106055',
     },
   });
 
-  const user3 = await prisma.user.upsert({
-    where: { email: 'carol@taskmaster.com' },
-    update: {},
-    create: {
-      email: 'carol@taskmaster.com',
-      name: 'Carol Davis',
+  const user3 = await prisma.user.create({
+    data: {
+      email: 'jawad@gmail.com',
+      name: 'Jawad',
       passwordHash: userPassword,
       role: Role.USER,
+      phoneNumber: '923705106055',
     },
   });
 
-  // Create sample tasks
+  // 3. Create sample tasks
   const task1 = await prisma.task.create({
     data: {
       title: 'Design new landing page',
@@ -79,73 +85,20 @@ async function main() {
     },
   });
 
-  const task3 = await prisma.task.create({
-    data: {
-      title: 'Write API documentation',
-      description: 'Document all REST endpoints with request/response examples',
-      status: TaskStatus.PENDING,
-      priority: Priority.MEDIUM,
-      dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-      createdById: user2.id,
-      assignedToId: user3.id,
-    },
-  });
-
-  const task4 = await prisma.task.create({
-    data: {
-      title: 'Set up CI/CD pipeline',
-      description: 'Configure GitHub Actions for automated testing and deployment',
-      status: TaskStatus.DONE,
-      priority: Priority.HIGH,
-      completedAt: new Date(),
-      dueDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-      createdById: admin.id,
-      assignedToId: user2.id,
-    },
-  });
-
-  // Add some comments
-  await prisma.comment.create({
-    data: {
-      content: 'I have started working on the wireframes. Will share a draft by EOD.',
-      taskId: task1.id,
-      userId: user1.id,
-    },
-  });
-
-  await prisma.comment.create({
-    data: {
-      content: 'Looking great! Please include mobile responsive designs.',
-      taskId: task1.id,
-      userId: admin.id,
-    },
-  });
-
-  await prisma.comment.create({
-    data: {
-      content: 'I can reproduce the bug. It seems related to the JWT expiry handling.',
-      taskId: task2.id,
-      userId: user2.id,
-    },
-  });
-
-  // Activity logs
+  // 4. Activity logs
   await prisma.activityLog.createMany({
     data: [
       { userId: admin.id, taskId: task1.id, action: 'TASK_CREATED', details: { title: task1.title } },
       { userId: user1.id, taskId: task1.id, action: 'TASK_STATUS_CHANGED', details: { from: 'PENDING', to: 'IN_PROGRESS' } },
-      { userId: user1.id, taskId: task2.id, action: 'TASK_CREATED', details: { title: task2.title } },
-      { userId: admin.id, taskId: task4.id, action: 'TASK_CREATED', details: { title: task4.title } },
-      { userId: user2.id, taskId: task4.id, action: 'TASK_STATUS_CHANGED', details: { from: 'IN_PROGRESS', to: 'DONE' } },
     ],
   });
 
   console.log('✅ Seed complete!');
-  console.log('\n📋 Test Accounts:');
-  console.log('  Ishfaq:  admin@gmail.com / admin123');
-  console.log('  Usama:  usama@gmail.com / user123');
-  console.log('  Azib:    Azib@gmail.com   / user123');
-  console.log('  Jawad:  jawad@gmail.com / user123');
+  console.log('\n📋 Updated Test Accounts:');
+  console.log(`  Admin:  ${admin.email} / admin123 (WA: ${admin.phoneNumber})`);
+  console.log(`  Usama:  ${user1.email} / user123  (WA: ${user1.phoneNumber})`);
+  console.log(`  Azib:   ${user2.email} / user123  (WA: ${user2.phoneNumber})`);
+  console.log(`  Jawad:  ${user3.email} / user123  (WA: ${user3.phoneNumber})`);
 }
 
 main()

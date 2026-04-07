@@ -1,0 +1,27 @@
+2026/04/07-21:40:15.780 2d64 Reusing MANIFEST C:\Users\hp\Desktop\TaskManager\backend\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/07-21:40:15.781 2d64 Recovering log #18
+2026/04/07-21:40:15.782 2d64 Reusing old log C:\Users\hp\Desktop\TaskManager\backend\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000018.log 
+2026/04/07-21:40:15.782 2d64 Delete type=2 #17
+2026/04/07-21:40:16.045 2d64 Level-0 table #23: started
+2026/04/07-21:40:16.059 2d64 Level-0 table #23: 8958 bytes OK
+2026/04/07-21:40:16.060 2d64 Delete type=0 #18
+2026/04/07-21:40:16.061 2d64 Manual compaction at level-0 from '\x00\x0e\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x0f\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/04/07-21:40:16.062 2d64 Manual compaction at level-1 from '\x00\x0e\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x0f\x00\x00\x00' @ 0 : 0; will stop at '\x00\x0f\x0a\x02\x03\x00\x00\x00\x00\x00\x00\xf0?' @ 10277 : 1
+2026/04/07-21:40:16.062 2d64 Compacting 1@1 + 1@2 files
+2026/04/07-21:40:16.066 2d64 Generated table #24@1: 203 keys, 4111 bytes
+2026/04/07-21:40:16.067 2d64 Compacted 1@1 + 1@2 files => 4111 bytes
+2026/04/07-21:40:16.067 2d64 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/04/07-21:40:16.068 2d64 Delete type=2 #23
+2026/04/07-21:40:16.068 2d64 Manual compaction at level-1 from '\x00\x0f\x0a\x02\x03\x00\x00\x00\x00\x00\x00\xf0?' @ 10277 : 1 .. '\x00\x0f\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/04/07-21:40:16.069 2d64 Level-0 table #26: started
+2026/04/07-21:40:16.082 2d64 Level-0 table #26: 2662 bytes OK
+2026/04/07-21:40:16.084 2d64 Delete type=2 #20
+2026/04/07-21:40:16.084 2d64 Delete type=0 #22
+2026/04/07-21:40:16.084 2d64 Manual compaction at level-0 from '\x00\x0f\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x10\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/04/07-21:40:16.085 2d64 Manual compaction at level-1 from '\x00\x0f\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x10\x00\x00\x00' @ 0 : 0; will stop at '\x00\x10\x00\x00\xc8\x1a\x00u\x00n\x00r\x00e\x00s\x00p\x00o\x00n\x00s\x00i\x00v\x00e\x00n\x00e\x00s\x00s\x00-\x00e\x00v\x00e\x00n\x00t\x00s\x00-\x00v\x002' @ 10366 : 1
+2026/04/07-21:40:16.085 2d64 Compacting 1@1 + 1@2 files
+2026/04/07-21:40:16.096 2d64 Generated table #27@1: 52 keys, 1095 bytes
+2026/04/07-21:40:16.096 2d64 Compacted 1@1 + 1@2 files => 1095 bytes
+2026/04/07-21:40:16.098 2d64 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/04/07-21:40:16.098 2d64 Delete type=2 #26
+2026/04/07-21:40:16.099 2d64 Manual compaction at level-1 from '\x00\x10\x00\x00\xc8\x1a\x00u\x00n\x00r\x00e\x00s\x00p\x00o\x00n\x00s\x00i\x00v\x00e\x00n\x00e\x00s\x00s\x00-\x00e\x00v\x00e\x00n\x00t\x00s\x00-\x00v\x002' @ 10366 : 1 .. '\x00\x10\x00\x00\x00' @ 0 : 0; will stop at (end)

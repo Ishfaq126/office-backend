@@ -4,6 +4,7 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import routes from './routes';
 import { startCronJobs } from './services/cron.service';
+import './services/whatsapp.service';
 
 dotenv.config();
 

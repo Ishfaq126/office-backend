@@ -64,7 +64,7 @@ export async function sendPushNotification(
       // Android-specific
       channelId: 'default',
       // iOS-specific
-      categoryIdentifier: payload.type,
+      categoryId: payload.type,
     };
 
     console.log(`📤 [Step 4] Sending request to Expo servers...`);

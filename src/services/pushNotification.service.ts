@@ -15,9 +15,11 @@ export async function sendPushNotification(
   userId: number,
   payload: NotificationPayload
 ): Promise<void> {
+  console.log(`\n--- 🔔 START PUSH ATTEMPT for User ID: ${userId} ---`);
+  
   try {
-    // Save to DB first
-    await prisma.notification.create({
+    // 1. Check Database Insertion
+    const newNotification = await prisma.notification.create({
       data: {
         userId,
         title: payload.title,
@@ -26,18 +28,28 @@ export async function sendPushNotification(
         data: payload.data || {},
       },
     });
+    console.log(`✅ [Step 1] Saved to DB. Notification ID: ${newNotification.id}`);
 
-    // Get user's push token
+    // 2. Fetch User and Token
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { expoPushToken: true, name: true },
     });
 
-    if (!user?.expoPushToken) return;
+    if (!user) {
+      console.error(`❌ [Step 2] User ${userId} not found in database!`);
+      return;
+    }
 
-    // Validate token
+    if (!user.expoPushToken) {
+      console.warn(`⚠️ [Step 2] User "${user.name}" (ID: ${userId}) has NO push token stored.`);
+      return;
+    }
+    console.log(`📱 [Step 2] Found Token for ${user.name}: ${user.expoPushToken.substring(0, 20)}...`);
+
+    // 3. Validate Token Format
     if (!Expo.isExpoPushToken(user.expoPushToken)) {
-      console.warn(`Invalid Expo push token for user ${userId}: ${user.expoPushToken}`);
+      console.error(`❌ [Step 3] Token is NOT a valid Expo Push Token: ${user.expoPushToken}`);
       // Clear invalid token
       await prisma.user.update({
         where: { id: userId },
@@ -45,7 +57,9 @@ export async function sendPushNotification(
       });
       return;
     }
+    console.log(`✅ [Step 3] Token format is valid.`);
 
+    // 4. Construct Message
     const message: ExpoPushMessage = {
       to: user.expoPushToken,
       sound: 'default',
@@ -57,28 +71,36 @@ export async function sendPushNotification(
       badge: 1,
     };
 
+    // 5. Send to Expo
+    console.log(`📤 [Step 4] Sending request to Expo servers...`);
     const chunks = expo.chunkPushNotifications([message]);
 
     for (const chunk of chunks) {
       try {
         const tickets: ExpoPushTicket[] = await expo.sendPushNotificationsAsync(chunk);
+        console.log(`🎫 [Step 5] Expo Response Received:`, JSON.stringify(tickets, null, 2));
+
         for (const ticket of tickets) {
           if (ticket.status === 'error') {
-            console.error('Push notification error:', ticket.message);
+            console.error('🔴 [Step 5] Expo Error Ticket:', ticket.message);
             if (ticket.details?.error === 'DeviceNotRegistered') {
+              console.warn('🗑️ Device not registered. Removing token from DB.');
               await prisma.user.update({
                 where: { id: userId },
                 data: { expoPushToken: null },
               });
             }
+          } else {
+            console.log('🚀 [Step 5] Success! Ticket ID:', ticket.id);
           }
         }
       } catch (err) {
-        console.error('Error sending push chunk:', err);
+        console.error('❌ [Step 5] Network Error sending push chunk:', err);
       }
     }
+    console.log(`--- 🔔 END PUSH ATTEMPT --- \n`);
   } catch (error) {
-    console.error('sendPushNotification error:', error);
+    console.error('❌ CRITICAL ERROR in sendPushNotification:', error);
   }
 }
 

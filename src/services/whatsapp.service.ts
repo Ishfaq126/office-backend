@@ -7,7 +7,6 @@ const whatsappClient = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         browserWSEndpoint: 'ws://office-task-manager-browserless.aeju8m.easypanel.host/chromium',
-        handleSIGINT: false,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
     }
 });

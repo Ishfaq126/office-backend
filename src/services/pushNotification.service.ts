@@ -41,7 +41,7 @@ export async function sendPushNotification(
       console.log(`⚠️  [Step 2] No push token for user ${userId} — in-app only.`);
       return;
     }
-    console.log(`📱 [Step 2] Found Token for ${user.name}: ${user.expoPushToken.slice(0, 30)}...`);
+    console.log(`📱 [Step 2] Found Token for ${user.name}: ${user.expoPushToken}`);
 
     // 3. Validate token format
     if (!Expo.isExpoPushToken(user.expoPushToken)) {

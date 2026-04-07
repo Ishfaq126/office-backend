@@ -117,15 +117,6 @@ export const createTask = async (req: AuthRequest, res: Response): Promise<void>
     const { title, description, assignedToId, dueDate, priority } = req.body;
     const userId = req.user!.id;
 
-    // Verify assignee exists
-    const assignee = await prisma.user.findUnique({
-      where: { id: parseInt(assignedToId), isActive: true },
-    });
-    if (!assignee) {
-      res.status(400).json({ message: 'Assignee not found' });
-      return;
-    }
-
     const task = await prisma.task.create({
       data: {
         title,
@@ -135,28 +126,24 @@ export const createTask = async (req: AuthRequest, res: Response): Promise<void>
         priority: priority || 'MEDIUM',
         createdById: userId,
       },
-      include: {
-        createdBy: { select: { id: true, name: true, email: true, avatar: true } },
-        assignedTo: { select: { id: true, name: true, email: true, avatar: true } },
-      },
     });
 
-    // Activity log
     await prisma.activityLog.create({
       data: { userId, taskId: task.id, action: 'TASK_CREATED', details: { title } },
     });
 
-    // Notify assignee (if not self)
+    // 🔔 NOTIFY ASSIGNEE
     if (parseInt(assignedToId) !== userId) {
-      await sendPushNotification(
+      console.log(`📡 Attempting to notify assignee (ID: ${assignedToId})...`);
+      sendPushNotification(
         parseInt(assignedToId),
         NotificationBuilders.taskAssigned(task.id, title)
-      );
+      ).catch(err => console.error("❌ Notification failed:", err.message));
     }
 
     res.status(201).json({ message: 'Task created', task });
   } catch (error) {
-    console.error(error);
+    console.error("❌ Controller Error:", error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -233,11 +220,15 @@ export const updateTaskStatus = async (req: AuthRequest, res: Response): Promise
   try {
     const taskId = parseInt(req.params.id);
     const userId = req.user!.id;
+    const role = req.user!.role;
     const { status } = req.body;
 
-    const existingTask = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: { createdBy: true, assignedTo: true },
+    const existingTask = await prisma.task.findFirst({
+      where: { id: taskId, ...getVisibilityFilter(userId, role) },
+      include: {
+        createdBy: { select: { id: true, name: true } },
+        assignedTo: { select: { id: true, name: true } },
+      },
     });
 
     if (!existingTask) {
@@ -245,39 +236,72 @@ export const updateTaskStatus = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
+    // Status transition validation
+    const validTransitions: Record<string, string[]> = {
+      PENDING: ['IN_PROGRESS', 'DONE', 'CANCELLED'],
+      IN_PROGRESS: ['PENDING', 'DONE', 'CANCELLED'],
+      DONE: role === 'ADMIN' ? ['PENDING', 'IN_PROGRESS'] : [],
+      CANCELLED: role === 'ADMIN' ? ['PENDING'] : [],
+    };
+
+    if (!validTransitions[existingTask.status]?.includes(status)) {
+      res.status(400).json({
+        message: `Cannot transition from ${existingTask.status} to ${status}`,
+      });
+      return;
+    }
+
+    const updateData: any = { status };
+    if (status === 'DONE') updateData.completedAt = new Date();
+    if (status !== 'DONE') updateData.completedAt = null;
+
     const task = await prisma.task.update({
       where: { id: taskId },
-      data: { 
-        status, 
-        completedAt: status === 'DONE' ? new Date() : null 
+      data: updateData,
+      include: {
+        createdBy: { select: { id: true, name: true } },
+        assignedTo: { select: { id: true, name: true } },
+      },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        userId, taskId,
+        action: 'TASK_STATUS_CHANGED',
+        details: { from: existingTask.status, to: status },
       },
     });
 
     const actor = req.user!.name;
 
-    // 🔔 NOTIFICATIONS
     if (status === 'DONE') {
-      // Notify creator if the assignee finished it
+      // Notify creator if assignee completed it
       if (userId === existingTask.assignedToId && existingTask.createdById !== userId) {
-        sendPushNotification(
+        await sendPushNotification(
           existingTask.createdById,
           NotificationBuilders.taskCompleted(taskId, task.title, actor)
-        ).catch(err => console.error("❌ Push Fail:", err.message));
+        );
+      }
+      // Notify assignee if creator completed it
+      if (userId === existingTask.createdById && existingTask.assignedToId !== userId) {
+        await sendPushNotification(
+          existingTask.assignedToId,
+          NotificationBuilders.taskCompleted(taskId, task.title, actor)
+        );
       }
     } else {
-      // Notify both parties of any other status change
+      // Status changed notification
       const notifyIds = [existingTask.createdById, existingTask.assignedToId]
-        .filter(id => id !== userId);
+        .filter((id, i, arr) => arr.indexOf(id) === i && id !== userId);
 
-      sendBulkPushNotifications(
+      await sendBulkPushNotifications(
         notifyIds,
         NotificationBuilders.statusChanged(taskId, task.title, status, actor)
-      ).catch(err => console.error("❌ Bulk Push Fail:", err.message));
+      );
     }
 
-    res.json({ message: 'Task updated', task });
+    res.json({ message: 'Task status updated', task });
   } catch (error) {
-    console.error("❌ Controller Error:", error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

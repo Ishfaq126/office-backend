@@ -53,6 +53,7 @@ export async function sendPushNotification(
       body: payload.body,
       data: payload.data,
       priority: 'high',
+      channelId: 'default',
       badge: 1,
     };
 

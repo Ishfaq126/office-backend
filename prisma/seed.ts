@@ -142,10 +142,10 @@ async function main() {
 
   console.log('✅ Seed complete!');
   console.log('\n📋 Test Accounts:');
-  console.log('  Admin:  admin@taskmaster.com / admin123');
-  console.log('  Alice:  alice@taskmaster.com / user123');
-  console.log('  Bob:    bob@taskmaster.com   / user123');
-  console.log('  Carol:  carol@taskmaster.com / user123');
+  console.log('  Ishfaq:  admin@gmail.com / admin123');
+  console.log('  Usama:  usama@gmail.com / user123');
+  console.log('  Azib:    Azib@gmail.com   / user123');
+  console.log('  Jawad:  jawad@gmail.com / user123');
 }
 
 main()

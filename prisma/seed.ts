@@ -1,4 +1,4 @@
-import { PrismaClient, Role, TaskStatus, Priority } from '@prisma/client';
+import { PrismaClient, Role } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -25,17 +25,17 @@ async function main() {
       name: 'Ishfaq (Admin)',
       passwordHash: adminPassword,
       role: Role.ADMIN,
-      phoneNumber: '923337881264', // Cleaned format for WhatsApp
+      phoneNumber: '923337881264', 
     },
   });
 
-  // 2. Create Regular Users
+  // 2. Create Other Users & Admins
   const user1 = await prisma.user.create({
     data: {
       email: 'usama@gmail.com',
       name: 'Usama',
       passwordHash: userPassword,
-      role: Role.USER,
+      role: Role.ADMIN,
       phoneNumber: '923705106055',
     },
   });
@@ -46,7 +46,7 @@ async function main() {
       name: 'Azib',
       passwordHash: userPassword,
       role: Role.USER,
-      phoneNumber: '923705106055',
+      phoneNumber: '923032751945',
     },
   });
 
@@ -55,50 +55,50 @@ async function main() {
       email: 'jawad@gmail.com',
       name: 'Jawad',
       passwordHash: userPassword,
+      role: Role.ADMIN,
+      phoneNumber: '923328049040',
+    },
+  });
+
+  const user4 = await prisma.user.create({
+    data: {
+      email: 'umer@gmail.com',
+      name: 'Umer',
+      passwordHash: userPassword,
       role: Role.USER,
-      phoneNumber: '923705106055',
+      phoneNumber: '923128720077',
     },
   });
 
-  // 3. Create sample tasks
-  const task1 = await prisma.task.create({
+  const user5 = await prisma.user.create({
     data: {
-      title: 'Design new landing page',
-      description: 'Create wireframes and mockups for the new marketing landing page',
-      status: TaskStatus.IN_PROGRESS,
-      priority: Priority.HIGH,
-      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      createdById: admin.id,
-      assignedToId: user1.id,
+      email: 'atal@gmail.com',
+      name: 'Atal Shah',
+      passwordHash: userPassword,
+      role: Role.USER,
+      phoneNumber: '923138220898',
     },
   });
 
-  const task2 = await prisma.task.create({
+  const user6 = await prisma.user.create({
     data: {
-      title: 'Fix authentication bug',
-      description: 'Users are being logged out unexpectedly after 10 minutes',
-      status: TaskStatus.PENDING,
-      priority: Priority.URGENT,
-      dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
-      createdById: user1.id,
-      assignedToId: user2.id,
+      email: 'mansoor@gmail.com',
+      name: 'Mansoor Ahmed',
+      passwordHash: userPassword,
+      role: Role.ADMIN,
+      phoneNumber: '923438207678',
     },
-  });
-
-  // 4. Activity logs
-  await prisma.activityLog.createMany({
-    data: [
-      { userId: admin.id, taskId: task1.id, action: 'TASK_CREATED', details: { title: task1.title } },
-      { userId: user1.id, taskId: task1.id, action: 'TASK_STATUS_CHANGED', details: { from: 'PENDING', to: 'IN_PROGRESS' } },
-    ],
   });
 
   console.log('✅ Seed complete!');
   console.log('\n📋 Updated Test Accounts:');
-  console.log(`  Admin:  ${admin.email} / admin123 (WA: ${admin.phoneNumber})`);
-  console.log(`  Usama:  ${user1.email} / user123  (WA: ${user1.phoneNumber})`);
-  console.log(`  Azib:   ${user2.email} / user123  (WA: ${user2.phoneNumber})`);
-  console.log(`  Jawad:  ${user3.email} / user123  (WA: ${user3.phoneNumber})`);
+  console.log(`  Admin:         ${admin.email} / admin123 (WA: ${admin.phoneNumber})`);
+  console.log(`  Usama:         ${user1.email} / user123  (WA: ${user1.phoneNumber})`);
+  console.log(`  Azib:          ${user2.email} / user123  (WA: ${user2.phoneNumber})`);
+  console.log(`  Jawad:         ${user3.email} / user123  (WA: ${user3.phoneNumber})`);
+  console.log(`  Umer:          ${user4.email} / user123  (WA: ${user4.phoneNumber})`);
+  console.log(`  Atal Shah:     ${user5.email} / user123  (WA: ${user5.phoneNumber})`);
+  console.log(`  Mansoor Ahmed: ${user6.email} / user123  (WA: ${user6.phoneNumber})`);
 }
 
 main()

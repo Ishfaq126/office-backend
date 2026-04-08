@@ -5,7 +5,6 @@ import { NotificationType } from '@prisma/client';
 
 const expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
 
-// In-memory store of ticket IDs to check receipts for (flush every 15 min in prod)
 const pendingReceiptIds: ExpoPushReceiptId[] = [];
 
 interface NotificationPayload {
@@ -15,6 +14,34 @@ interface NotificationPayload {
   data?: Record<string, any>;
 }
 
+// ─── NEW: Get all admin user IDs ───────────────────────────────────────────────
+async function getAdminUserIds(): Promise<number[]> {
+  const admins = await prisma.user.findMany({
+    where: { role: 'ADMIN', isActive: true },
+    select: { id: true },
+  });
+  return admins.map(a => a.id);
+}
+
+// ─── NEW: Resolve all recipients (assignee + assigner + admins, deduped) ──────
+async function resolveRecipients(
+  assignedToId?: number | null,
+  createdById?: number | null,
+  excludeUserId?: number | null  // don't notify the person who triggered the action
+): Promise<number[]> {
+  const adminIds = await getAdminUserIds();
+
+  const allIds = [
+    ...(assignedToId ? [assignedToId] : []),
+    ...(createdById ? [createdById] : []),
+    ...adminIds,
+  ];
+
+  // Deduplicate and optionally exclude the actor
+  return [...new Set(allIds)].filter(id => id !== excludeUserId);
+}
+
+// ─── Core send to a single user (unchanged logic) ─────────────────────────────
 export async function sendPushNotification(
   userId: number,
   payload: NotificationPayload
@@ -22,7 +49,6 @@ export async function sendPushNotification(
   try {
     console.log(`--- 🔔 START NOTIFICATION ATTEMPT for User ID: ${userId} ---`);
 
-    // 1. Always save to DB so in-app notifications work regardless of push
     const dbNotif = await prisma.notification.create({
       data: {
         userId,
@@ -34,36 +60,27 @@ export async function sendPushNotification(
     });
     console.log(`✅ [Step 1] Saved to DB. Notification ID: ${dbNotif.id}`);
 
-    // 🟢 NEW: [Step 1.5] Trigger WhatsApp Message
-    // Formatting the message with *stars* makes the title Bold in WhatsApp
     const whatsappMessage = `🔔 *${payload.title}*\n\n${payload.body}\n\n_Check the app for more details._`;
-    
-    // We don't necessarily need to 'await' this if we want the push logic to continue immediately
-    sendWhatsAppNotification(userId, whatsappMessage).catch(err => 
+    sendWhatsAppNotification(userId, whatsappMessage).catch(err =>
       console.error(`❌ WhatsApp background error:`, err)
     );
 
-    // 2. Get user's push token for Expo
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { expoPushToken: true, name: true },
     });
 
     if (!user?.expoPushToken) {
-      console.log(`⚠️  [Step 2] No push token for ${user?.name || userId} — Mobile Push skipped (WhatsApp sent).`);
+      console.log(`⚠️  [Step 2] No push token for ${user?.name || userId} — Mobile Push skipped.`);
       return;
     }
-    console.log(`📱 [Step 2] Found Token for ${user.name}: ${user.expoPushToken}`);
 
-    // 3. Validate token format
     if (!Expo.isExpoPushToken(user.expoPushToken)) {
-      console.warn(`❌ [Step 3] INVALID token format for user ${userId}. Clearing from DB.`);
+      console.warn(`❌ [Step 3] INVALID token for user ${userId}. Clearing.`);
       await prisma.user.update({ where: { id: userId }, data: { expoPushToken: null } });
       return;
     }
-    console.log(`✅ [Step 3] Token format is valid.`);
 
-    // 4. Build the message
     const message: ExpoPushMessage = {
       to: user.expoPushToken,
       sound: 'default',
@@ -72,44 +89,47 @@ export async function sendPushNotification(
       data: { ...payload.data, notificationId: dbNotif.id },
       priority: 'high',
       badge: 1,
-      channelId: 'default', // Matches Android Channel ID
-      categoryId: payload.type, // Matches iOS Category ID
+      channelId: 'default',
+      categoryId: payload.type,
     };
 
-    console.log(`📤 [Step 4] Sending request to Expo servers...`);
     const chunks = expo.chunkPushNotifications([message]);
-
     for (const chunk of chunks) {
       const tickets = await expo.sendPushNotificationsAsync(chunk);
-      console.log(`🎫 [Step 5] Expo Response Received:`, JSON.stringify(tickets, null, 2));
-
       for (const ticket of tickets) {
         if (ticket.status === 'ok') {
-          console.log(`🚀 [Step 5] Success! Ticket ID: ${ticket.id}`);
           pendingReceiptIds.push(ticket.id);
         } else {
-          console.error(`❌ [Step 5] Expo REJECTED ticket:`, ticket);
-          
-          // Handle specific Expo errors
+          console.error(`❌ [Step 5] Expo REJECTED:`, ticket);
           if ((ticket as any).details?.error === 'DeviceNotRegistered') {
-            console.warn(`🗑️  Clearing stale token for user ${userId}`);
             await prisma.user.update({ where: { id: userId }, data: { expoPushToken: null } });
           }
         }
       }
     }
-    console.log(`--- 🔔 END PUSH ATTEMPT ---`);
-    
+
   } catch (error: any) {
-    console.error(`💥 sendPushNotification THREW:`, error?.message || error);
+    console.error(`💥 sendPushNotification THREW for user ${userId}:`, error?.message || error);
   }
 }
 
-/**
- * Check Expo push receipts for previously-sent tickets.
- * Receipts tell you whether FCM/APNs actually delivered the notification.
- * Call this ~15 minutes after sending — Expo holds receipts for 24h.
- */
+// ─── NEW: Send to multiple users at once ──────────────────────────────────────
+export async function sendPushNotificationToMany(
+  userIds: number[],
+  payload: NotificationPayload
+): Promise<void> {
+  if (userIds.length === 0) return;
+  console.log(`📣 Sending "${payload.title}" to ${userIds.length} user(s): [${userIds.join(', ')}]`);
+  await Promise.allSettled(userIds.map(uid => sendPushNotification(uid, payload)));
+}
+
+export async function sendBulkPushNotifications(
+  userIds: number[],
+  payload: NotificationPayload
+): Promise<void> {
+  await sendPushNotificationToMany(userIds, payload);
+}
+
 export async function checkPushReceipts(): Promise<void> {
   if (pendingReceiptIds.length === 0) return;
 
@@ -122,14 +142,9 @@ export async function checkPushReceipts(): Promise<void> {
       const receipts = await expo.getPushNotificationReceiptsAsync(chunk);
       for (const [receiptId, receipt] of Object.entries(receipts)) {
         if (receipt.status === 'ok') {
-          console.log(`✅ Receipt ${receiptId}: delivered successfully`);
+          console.log(`✅ Receipt ${receiptId}: delivered`);
         } else {
           console.error(`❌ Receipt ${receiptId}: FAILED`, receipt);
-          // receipt.details.error values:
-          // DeviceNotRegistered — token no longer valid
-          // MessageRateExceeded — too many messages
-          // MismatchSenderId   — wrong FCM sender
-          // InvalidCredentials — FCM/APNs key expired
         }
       }
     }
@@ -138,15 +153,7 @@ export async function checkPushReceipts(): Promise<void> {
   }
 }
 
-export async function sendBulkPushNotifications(
-  userIds: number[],
-  payload: NotificationPayload
-): Promise<void> {
-  await Promise.allSettled(userIds.map(uid => sendPushNotification(uid, payload)));
-}
-
 // ─── Notification payload builders ────────────────────────────────────────────
-
 export const NotificationBuilders = {
   taskAssigned: (taskId: number, taskTitle: string) => ({
     title: '📋 New Task Assigned',
@@ -197,3 +204,40 @@ export const NotificationBuilders = {
     data: { taskId, screen: 'TaskDetail' },
   }),
 };
+
+// ─── NEW: Smart dispatch — resolves recipients automatically from a task ───────
+/**
+ * Use this in your task controllers instead of sendPushNotification().
+ * It automatically sends to: assignee + assigner (createdBy) + all admins.
+ *
+ * @param taskId       - The task ID to look up assignee/assigner from
+ * @param payload      - Notification payload (use NotificationBuilders)
+ * @param actorUserId  - The user who triggered the action (excluded from receiving)
+ */
+export async function notifyTaskParticipants(
+  taskId: number,
+  payload: NotificationPayload,
+  actorUserId?: number
+): Promise<void> {
+  try {
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { assignedToId: true, createdById: true },
+    });
+
+    if (!task) {
+      console.warn(`⚠️  notifyTaskParticipants: Task ${taskId} not found`);
+      return;
+    }
+
+    const recipients = await resolveRecipients(
+      task.assignedToId,
+      task.createdById,
+      actorUserId
+    );
+
+    await sendPushNotificationToMany(recipients, payload);
+  } catch (err: any) {
+    console.error(`💥 notifyTaskParticipants error:`, err?.message);
+  }
+}

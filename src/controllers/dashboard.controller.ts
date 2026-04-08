@@ -61,9 +61,9 @@ async function getAdminStats(req: AuthRequest, res: Response) {
       orderBy: { _count: { id: 'desc' } },
       take: 5,
     }),
-    // Last 7 days completion trend
+    // ✅ CAST to INTEGER to avoid BigInt serialization error
     prisma.$queryRaw`
-      SELECT DATE("completedAt") as date, COUNT(*) as count
+      SELECT DATE("completedAt") as date, CAST(COUNT(*) AS INTEGER) as count
       FROM tasks
       WHERE "completedAt" >= NOW() - INTERVAL '7 days'
       AND status = 'DONE'
@@ -81,7 +81,6 @@ async function getAdminStats(req: AuthRequest, res: Response) {
     }),
   ]);
 
-  // Hydrate assignee names
   const assigneeIds = topAssignees.map(a => a.assignedToId);
   const assigneeUsers = await prisma.user.findMany({
     where: { id: { in: assigneeIds } },
@@ -95,6 +94,12 @@ async function getAdminStats(req: AuthRequest, res: Response) {
 
   const totalDone = tasksByStatus.find(s => s.status === 'DONE')?._count.status || 0;
   const completionRate = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
+
+  // ✅ Safely convert BigInt → number just in case DB driver still returns BigInt
+  const safeTrend = (completionTrend as any[]).map(row => ({
+    date: row.date,
+    count: Number(row.count),
+  }));
 
   res.json({
     role: 'ADMIN',
@@ -114,7 +119,7 @@ async function getAdminStats(req: AuthRequest, res: Response) {
     })),
     topAssignees: topAssigneesWithNames,
     recentTasks,
-    completionTrend,
+    completionTrend: safeTrend,  // ✅ fixed
     recentActivity,
   });
 }
